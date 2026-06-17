@@ -348,6 +348,29 @@ Bullet list:
 
 ---
 
+## Stage 2.5 — Failing test first (TDD)
+
+**Goal:** before writing the fix, land a test that **FAILS on the current (unfixed) code** and captures the bug/feature contract. The fix is "done" only when this test goes green — and you have proven **red→green**.
+
+Applies to **bugfix**, **backend-contract**, and any feature with verifiable logic. Skip only for pure-design/visual tasks (the comparison wall covers those) or genuinely untestable glue — and say so explicitly when you skip.
+
+**Procedure:**
+1. **Find the repo's conformant test pattern — do NOT invent a bespoke rig.** Locate the runner + config + existing tests (`vitest`/`jest`/`pytest`; `*.test.ts` / `*_test.py`; a dedicated config like `vitest.unit.config.ts` or a `pyproject` test section). Match where tests live and how they run. If the repo has *no* harness at all, flag it to the user and fall back to the lightest conformant option rather than scaffolding a framework unasked. (swarm `ai-exchange-web`: pure logic in `lib/**` + colocated `*.test.ts`, run `vitest run --config vitest.unit.config.ts`.)
+2. **Make the defect unit-testable.** If it lives in hard-to-test code (a React render-timing race, a 3rd-party widget, IO), **extract the decision/core into a pure function** and test that. The extraction is part of the fix and MUST preserve behavior (e.g. for a valtio/`useSnapshot` subscription, the field must still be read at render so the subscription survives the extraction).
+3. **Write the failing test, run it, confirm it is RED for the right reason** (it reproduces the bug — not a typo/import error). Record the red output.
+4. **Then** go to Stage 3 and implement until the test is **GREEN**.
+5. **Prove red→green at the end of Stage 3:** temporarily revert the fix (or just the guard line) and re-run — the test MUST go RED again; restore and confirm GREEN. *A guard that doesn't fail without the fix is not a guard.* Record the red→green evidence in `03-implementation.md`.
+
+The test ships in the **same diff/PR** as the fix. This is the operational form of `/think` principle 4 ("write a test that reproduces it, then make it pass").
+
+**Why:** a regression test only earns trust if it actually catches the bug. (SPRK-278: the user asked "did you check it fails without the guard?" → proving red→green is now mandatory.)
+
+**Live end-to-end verification — drive the whole chain in Playwright (not just the unit):** for any runtime symptom (UI freeze, broken screen, wrong flow), a passing unit/component test is necessary but **not sufficient**. You must also drive the **real running app through the whole user flow in Playwright**: *before* the fix, reproduce the failure with your own eyes (screenshot + the telling signal); *after* the code is in, re-run the same flow and confirm the whole chain now works. **"Couldn't reproduce" ≠ "works"** — a flaky live path means fall back to the deterministic test, never declare success from a no-repro. Never write "verified" from reasoning ("the logic is airtight") — only from a RED→GREEN you observed. *How* to bring the app up and drive it is workspace-specific: the **overlay** defines the concrete harness. (SPRK-292: a plausible fix shipped wrong twice because the failing case was never reproduced — the user caught the freeze by simply looking.)
+
+**Stop condition:** test is RED for the right reason; proceed to Stage 3.
+
+---
+
 ## Stage 3 — Implementer (main agent + narration protocol)
 
 **Goal:** execute the plan. Stay in scope. Stay loud.
@@ -435,6 +458,8 @@ Read in order:
 3. tmp/<slug>/03-implementation.md (what was supposedly done)
 4. The actual diff: `git -C <project-root> diff <base>..HEAD` for each touched
    project (find them from 03-implementation.md "Files to touch").
+5. ~/.claude/skills/conformance-review/SKILL.md (conformance methodology for
+   the section below).
 {OVERLAY: append project-specific read list}
 
 Your single deliverable is tmp/<slug>/04-review-<N>.md. Read-only tools only.
@@ -459,6 +484,20 @@ Real breakage you can see by reading the code. Quote file:line. Be specific:
 LF, trailing whitespace, smart vs straight quotes) — run `hexdump -C` / `cat -A`,
 don't eyeball it. A confidently-wrong nit (SPRK-79: "format.ts inserts an ASCII
 space" — it was already U+00A0) wastes a fix cycle and erodes trust in the review.
+
+## Conformance (дифф против конвенций кодбейзы)
+Apply the conformance-review skill (item 5 of the read list): does the diff do
+things the way THIS repo does them? Hunt specifically for: self-built helpers /
+mappings / error-shapes / caches where an internal implementation exists (grep
+name-analogues: `*_TO_*`, `*_error`, `unsupported_*`, cache mechanisms); raw
+`str` params where neighbors use Literal/typed aliases; new env vars missing
+from `.env.example`; silent resolves where the repo has an explicit lookup
+pattern; AND the opposite trap — new wrapper layers/modules added "for purity"
+where direct reuse was enough (over-wrap). Every non-ok finding MUST carry
+codebaseEvidence: real file:line from THIS repo showing "how it's done here";
+general best practices are not an argument. Severity: must-fix / should-fix /
+nit / ok-as-is; if the baseline itself violates the convention → nit max.
+On review rounds N≥2, re-check only hunks changed since the previous round.
 
 ## Test gaps
 Were the test cases from 02-plan.md actually covered?
@@ -546,7 +585,20 @@ If a ticket is linked, leave a summary comment on it (Linear MCP `save_comment`,
 
 ### 6.5 — PR creation (optional)
 
-If the user wants a PR:
+**PR pre-flight — MANDATORY before `gh pr create`, in this order:**
+1. **Rebase freshness:** `git fetch origin <base>`, then
+   `git rev-list --count HEAD..origin/<base>`. If > 0 — the branch is stale:
+   rebase onto fresh base FIRST (resolve conflicts, re-run the verifies of any
+   step a conflict touched). Never open a PR from a branch behind its base.
+2. **Build check (post-rebase, not before):** run the project's standard
+   build/typecheck per the overlay or repo convention (e.g. `tsc --noEmit`,
+   `ruff check`, `task lint`). Zero NEW errors required. Pre-existing baseline
+   noise (verify via the same check on the base commit / `git stash`) — note
+   it in the PR body if relevant, don't fix others' lines.
+3. If either check was already done this session but the base moved since (new
+   merges upstream) — redo both; "it passed an hour ago" is not current.
+
+Then, if the user wants a PR:
 - Use the overlay-specified shortcut if available (e.g. `linear pr` for swarm).
 - Otherwise `gh pr create` with title + body referencing the ticket / changelog entry.
 - Promote the draft from 6.3 if you opened one for the diff review.
@@ -583,6 +635,7 @@ After every stage, **STOP** and surface the artifact to the user. Do not chain s
 |---|---|
 | 1 (Analyst) | "ok, plan it" / "перейдём к плану" / answer to open questions |
 | 2 (Planner) | "ok, implement" / "погнали кодить" |
+| 2.5 (Failing test) | flows into 3 — no separate gate; the RED test precedes any fix code |
 | 3 (Implementer) | "ok, review" / "ревью" |
 | 4 (Reviewer) | "fix these" / "ignore that one, fix the rest" / "ship it" |
 | 5 (Fix loop) | "another review" / "looks clean, ship it" |
@@ -662,6 +715,7 @@ Workspace overlays live at `~/.claude/skills/pipeline/contexts/*.md`. Each overl
 
 - **`/think`** — explicitly loaded at Stage 2 (planning) and Stage 5 (fix-loop triage). The four Karpathy principles drive both the plan and the pushback against bad reviewer notes.
 - **`/review`** — explicitly invoked at Stage 6.3 for the final pre-PR diff pass. Second pair of eyes after the Stage 4 sub-agent.
+- **`conformance-review`** — its methodology is embedded as the Stage 4 reviewer's `## Conformance` section (diff vs the surrounding codebase's live conventions: reuse-internal-first, no over-wrap, codebaseEvidence per finding). Also standalone-invocable (`/conformance-review`) when work happened outside the pipeline — run it before the PR for any unfamiliar repo/zone.
 - **`/graphify`** — Analyst sub-agent can use it to traverse the code graph if `graphify-out/` exists in the project. For design tasks it also answers "who renders / opens X" for the Connected-flows section.
 - **`html-report`** — renders user-facing checkpoint artifacts as scannable dark-themed HTML opened in **external Chrome** (`open -a "Google Chrome" <abs>`; the cmux built-in browser shows HTML as plaintext + hangs on link-select), with the absolute `file://` path printed as fallback: Stage 2 plan → `PLAN.html`, open questions / contentious decisions, design `EVIDENCE.html`, Stage 6 final → `FINAL.html`. Block `<style>` is fine; never localhost; never a relative path in chat. The markdown artifacts remain the durable trail; the HTML is what the user actually reviews.
 - **Figma skills (for `task-type=design`)** — wired into the design stages, in order:
@@ -701,6 +755,12 @@ For Linear-based workspaces only. The pipeline runs fully without `linear-cli` �
 **v2.4 (2026-06-06)** — **`html-report` skill** extracted and wired in: user-facing checkpoint artifacts (Stage 2 plan, open questions / contentious decisions, design EVIDENCE, Stage 6 final) are surfaced as scannable dark-themed HTML (**opened in external Chrome** via `open -a "Google Chrome"` — the cmux built-in browser shows HTML as **plaintext**; absolute `file://` path printed as fallback; block `<style>`) in addition to the markdown trail. Encodes the artifact-delivery rules learned in SPRK-90: never localhost for delivery; never a relative path in chat (cmux mangles `tmp/...` → `https://tmp/...` → blank page); block CSS renders fine in Chrome (the earlier "inline-styles fix" was a misdiagnosis).
 
 **v2.5 (2026-06-06)** — process hardening from SPRK-90 (composite 0.75; regret root D3 autonomy + D8 cost — env-blocker handling + outward-action discipline, not craft), via the **`pipeline-audit`** skill: Stage 3 **local-verification discipline** (kill stale dev/storybook servers before diagnosing; evidence-backed diagnosis — no asserted root-cause; a blocked check is to fix, not skip); Stage transitions **post-pushback confirm-before-batch** for outward actions; Stage 6.4 **visual evidence inline** (render report HTML → full-page PNG → `![](assetUrl)`, not files-to-download); Analyst **false-API-premise → mock-behind-real-shaped-seam** playbook; fixed the v2.4 appendix cmux drift; swarm overlay gained the Linear inline-render helper + the `PieCard data.name` reserved-prop gotcha.
+
+**v2.6 (2026-06-12)** — from the SPRK-108 review lessons: Stage 4 Reviewer gained the **`## Conformance` section** (conformance-review skill methodology: diff vs the repo's live conventions — reuse-internal-first / no over-wrap / Literal-aliases / `.env.example` / codebaseEvidence per finding, baseline-violates → nit max; rounds N≥2 re-check only new hunks) + the skill added to the reviewer read-list; Stage 6.5 gained the **mandatory PR pre-flight** (rebase-freshness via `rev-list --count HEAD..origin/<base>` + post-rebase build/typecheck with zero NEW errors; redo both if the base moved since the last check). Swarm overlay: per-repo pre-flight commands + base branches.
+
+**v2.7 (2026-06-15)** — from SPRK-278: new **Stage 2.5 — Failing test first (TDD)** between Plan and Implement — write a test that is RED on the unfixed code, extract a pure testable core for hard-to-test defects (React/valtio race, 3rd-party widget, IO), match the repo's conformant test harness (no bespoke rig), and **prove red→green** by reverting the guard at the end of Stage 3 (a guard that doesn't fail without the fix is not a guard). Test ships in the same diff/PR. Also: **one-doc-per-task** convention — a single consolidated doc per task (cause/fix/decisions/verification) for shared/ticket use, neutral politesse tone (never "the ticket is wrong"), no process chatter / owner-assignment inside the doc (that lives in chat); the html-report skill carries the rendering convention.
+
+**v2.8 (2026-06-17)** — from SPRK-292: **live red→green gate**. Stage 2.5 extended — for a runtime/UI symptom the unit/component test is the durable proof but not the whole proof: reproduce the failure in the real app *with your own eyes* before the fix and re-confirm after, via the workspace overlay's harness when defined (swarm → the new **`sparkling-verify`** skill: mint signed initData → drive the real Sparkling frontend in Playwright; flaky live agent/centrifuge → fall back to a deterministic jsdom/RTL component test). Hard gate: never write "works/verified" in a facing doc without an observed RED→GREEN — **"couldn't reproduce" ≠ "works"**, reasoning is not verification. Swarm overlay carries the concrete wiring.
 
 Bump this line on every change; `skillVersion` in `metrics.json` = `v<N>-<date>`.
 
