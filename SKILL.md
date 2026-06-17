@@ -28,7 +28,7 @@ The core is workspace-agnostic. Workspace-specific conventions (ticket system, c
    - Otherwise → content-derived kebab-case, 3–5 words: `swap-restyle`, `card-empty-state`, `auth-token-refresh`. Confirm with the user if ambiguous.
 
 3. **Pick the `tmp/` root**:
-   - If the overlay specifies a root (e.g. swarm uses `<swarm-root>/tmp/`) — use that.
+   - If the overlay specifies a root (e.g. the workspace uses `<workspace-root>/tmp/`) — use that.
    - Otherwise default to `<repo-root>/tmp/` (where repo-root = `git rev-parse --show-toplevel`).
    - Fall back to `./tmp/` if not in a git repo.
 
@@ -175,6 +175,19 @@ How does this work today? Include exact reproduction steps:
 - Which auth state / setup is needed?
 - What does the user see right now?
 
+**Ground this in an OBSERVED payload/state, not the issue's description.** For a
+bug, reproduce it and inspect the ACTUAL data on the wire / the events emitted —
+and **trace them to their producer** (the server / code path that builds the
+response). The issue's described symptom, quoted payload, and "probable cause" are
+premises that are often incomplete (a captured snapshot can miss a real-time
+event) or symptom-level — read the WHOLE payload/chain, not the one field the
+reporter highlighted, and confirm/refute the stated cause against what you
+observe. A root-cause that rests on the issue's premise rather than an observed
+payload is NOT verified. (Once: an issue quoted a response field as null and
+concluded "empty reply"; the real response carried a payload the client had no
+component to render — the captured log had missed a real-time event; a fix built
+on that premise shipped wrong.)
+
 ## Target behavior
 How should this work after the task is done? Be specific.
 
@@ -214,7 +227,7 @@ seam**: one client function whose *signature* matches the real call the ticket
 describes, body returns a deterministic mock today. Real endpoint later = swap
 that one body, hook + UI untouched. Flag the seam with a clear TODO. Don't block,
 and don't mock sloppily inline — the seam is what makes "swap later" a one-liner.
-(SPRK-90: ticket claimed `get_token_price_graph` existed; it didn't → seam.)
+(a prior retro: ticket claimed `get_token_price_graph` existed; it didn't → seam.)
 
 ## What could break
 Adjacent code paths that might regress.
@@ -233,7 +246,7 @@ a temporary "not yet"** — a sibling that already has a Figma node or a stubbed
 route is almost always "not yet". For "not yet", build the in-scope structure to
 ACCOMMODATE it cheaply (a list that takes N rows; a row that takes an optional
 href) instead of hardcoding the literal minimum — the "not yet" tends to land
-within days and rewrites a too-literal build. (SPRK-79: shipped one non-clickable
+within days and rewrites a too-literal build. (a prior retro: shipped one non-clickable
 Holdings row; Perpetuals/Prediction — flagged out-of-scope but present in Figma —
 became clickable sibling rows + routes days later, rewriting the section.)
 
@@ -355,7 +368,7 @@ Bullet list:
 Applies to **bugfix**, **backend-contract**, and any feature with verifiable logic. Skip only for pure-design/visual tasks (the comparison wall covers those) or genuinely untestable glue — and say so explicitly when you skip.
 
 **Procedure:**
-1. **Find the repo's conformant test pattern — do NOT invent a bespoke rig.** Locate the runner + config + existing tests (`vitest`/`jest`/`pytest`; `*.test.ts` / `*_test.py`; a dedicated config like `vitest.unit.config.ts` or a `pyproject` test section). Match where tests live and how they run. If the repo has *no* harness at all, flag it to the user and fall back to the lightest conformant option rather than scaffolding a framework unasked. (swarm `ai-exchange-web`: pure logic in `lib/**` + colocated `*.test.ts`, run `vitest run --config vitest.unit.config.ts`.)
+1. **Find the repo's conformant test pattern — do NOT invent a bespoke rig.** Locate the runner + config + existing tests (`vitest`/`jest`/`pytest`; `*.test.ts` / `*_test.py`; a dedicated config like `vitest.unit.config.ts` or a `pyproject` test section). Match where tests live and how they run. If the repo has *no* harness at all, flag it to the user and fall back to the lightest conformant option rather than scaffolding a framework unasked. (e.g. pure logic in `lib/**` + colocated `*.test.ts`, run via a dedicated test config — the overlay names the exact runner/command for a known workspace.)
 2. **Make the defect unit-testable.** If it lives in hard-to-test code (a React render-timing race, a 3rd-party widget, IO), **extract the decision/core into a pure function** and test that. The extraction is part of the fix and MUST preserve behavior (e.g. for a valtio/`useSnapshot` subscription, the field must still be read at render so the subscription survives the extraction).
 3. **Write the failing test, run it, confirm it is RED for the right reason** (it reproduces the bug — not a typo/import error). Record the red output.
 4. **Then** go to Stage 3 and implement until the test is **GREEN**.
@@ -363,9 +376,9 @@ Applies to **bugfix**, **backend-contract**, and any feature with verifiable log
 
 The test ships in the **same diff/PR** as the fix. This is the operational form of `/think` principle 4 ("write a test that reproduces it, then make it pass").
 
-**Why:** a regression test only earns trust if it actually catches the bug. (SPRK-278: the user asked "did you check it fails without the guard?" → proving red→green is now mandatory.)
+**Why:** a regression test only earns trust if it actually catches the bug. (a prior retro: the user asked "did you check it fails without the guard?" → proving red→green is now mandatory.)
 
-**Live end-to-end verification — drive the whole chain in Playwright (not just the unit):** for any runtime symptom (UI freeze, broken screen, wrong flow), a passing unit/component test is necessary but **not sufficient**. You must also drive the **real running app through the whole user flow in Playwright**: *before* the fix, reproduce the failure with your own eyes (screenshot + the telling signal); *after* the code is in, re-run the same flow and confirm the whole chain now works. **"Couldn't reproduce" ≠ "works"** — a flaky live path means fall back to the deterministic test, never declare success from a no-repro. Never write "verified" from reasoning ("the logic is airtight") — only from a RED→GREEN you observed. *How* to bring the app up and drive it is workspace-specific: the **overlay** defines the concrete harness. (SPRK-292: a plausible fix shipped wrong twice because the failing case was never reproduced — the user caught the freeze by simply looking.)
+**Live end-to-end verification — drive the whole chain in Playwright (not just the unit):** for any runtime symptom (UI freeze, broken screen, wrong flow), a passing unit/component test is necessary but **not sufficient**. You must also drive the **real running app through the whole user flow in Playwright**: *before* the fix, reproduce the failure with your own eyes (screenshot + the telling signal); *after* the code is in, re-run the same flow and confirm the whole chain now works. **"Couldn't reproduce" ≠ "works"** — a flaky live path means fall back to the deterministic test, never declare success from a no-repro. Never write "verified" from reasoning ("the logic is airtight") — only from a RED→GREEN you observed. *How* to bring the app up and drive it is workspace-specific: the **overlay** defines the concrete harness. (A plausible fix once shipped wrong because the failing case was never reproduced — it was caught by simply looking at the running app.)
 
 **Stop condition:** test is RED for the right reason; proceed to Stage 3.
 
@@ -397,12 +410,12 @@ The purpose of narration is for the user to interrupt (Esc / Ctrl+C) before you 
 - Move to the next.
 
 **Local-verification discipline (env-readiness — before declaring any check blocked or failed):**
-- **Kill stale dev servers first.** A running `next dev` / `storybook` caches the OLD module graph in memory and will keep reporting a fixed problem as broken — `pkill -f "next dev"` / `pkill -f storybook`, boot fresh, *then* read the result. (SPRK-90 #1 time-sink: a stale `next dev` made a working `bun install` look like it "didn't fix it".)
-- **Diagnose with evidence, not assertion.** State a root-cause as a *hypothesis* until proven — `ls`/inspect the actual installed version, reproduce on a fresh process. Never tell the user "X caused it" (a dep version, "a relink happened") without a check that confirms it. (SPRK-90: asserted a wrong `ox` version + an unverified "relink" — both retracted.)
+- **Kill stale dev servers first.** A running `next dev` / `storybook` caches the OLD module graph in memory and will keep reporting a fixed problem as broken — `pkill -f "next dev"` / `pkill -f storybook`, boot fresh, *then* read the result. (a prior retro #1 time-sink: a stale `next dev` made a working `bun install` look like it "didn't fix it".)
+- **Diagnose with evidence, not assertion.** State a root-cause as a *hypothesis* until proven — `ls`/inspect the actual installed version, reproduce on a fresh process. Never tell the user "X caused it" (a dep version, "a relink happened") without a check that confirms it. (a prior retro: asserted a wrong `ox` version + an unverified "relink" — both retracted.)
 - **A blocked verification is a problem to fix, not a reason to skip.** If the environment blocks a check (especially the ⟦DESIGN⟧ visual-acceptance gate below), fixing the env is in-zone — auto-do it (per the 4-condition autonomy rule) instead of downgrading to "can't verify / optional".
 
 **⟦DESIGN⟧ Per-layer rhythm (default implementer = figma-implement skill):**
-**Before coding a layer, resolve every LEAF visual in it from Figma — do NOT approximate.** Enumerate each icon / button stroke / chip-or-pill chrome / divider and pull its exact source: icons → `get_screenshot` / export as an asset (never substitute a lucide glyph for a custom Figma icon); bubbles / chips / borders → a per-node `get_design_context` dump of the stroke + fill, NOT the defaults of whatever component you're reusing. Reusing a component's *layout* is fine; inheriting its *chrome* where Figma differs is a deferral that resurfaces as a user-caught tweak round (SPRK-79 spent 3 — a coin icon faked with lucide `Wallet`, a missing button glass border, an unwanted address pill — all caught on renders, none by self-verify).
+**Before coding a layer, resolve every LEAF visual in it from Figma — do NOT approximate.** Enumerate each icon / button stroke / chip-or-pill chrome / divider and pull its exact source: icons → `get_screenshot` / export as an asset (never substitute a lucide glyph for a custom Figma icon); bubbles / chips / borders → a per-node `get_design_context` dump of the stroke + fill, NOT the defaults of whatever component you're reusing. Reusing a component's *layout* is fine; inheriting its *chrome* where Figma differs is a deferral that resurfaces as a user-caught tweak round (a prior retro spent 3 — a coin icon faked with lucide `Wallet`, a missing button glass border, an unwanted address pill — all caught on renders, none by self-verify).
 For each Figma layer:
 1. Implement with numbers verbatim — `style={{height:50}}` for px, `rem` for fonts. **Never** Tailwind arbitrary like `h-[50px]` (the JIT may silently fall back).
 2. Verify via Playwright `getBoundingClientRect` that the class actually applied (not a fallback size).
@@ -482,7 +495,7 @@ Real breakage you can see by reading the code. Quote file:line. Be specific:
 "Line 47: handler is bound on mount but never removed on unmount — leak."
 **Verify before asserting a byte/character-level claim** (ASCII vs NBSP, CRLF vs
 LF, trailing whitespace, smart vs straight quotes) — run `hexdump -C` / `cat -A`,
-don't eyeball it. A confidently-wrong nit (SPRK-79: "format.ts inserts an ASCII
+don't eyeball it. A confidently-wrong nit (a prior retro: "format.ts inserts an ASCII
 space" — it was already U+00A0) wastes a fix cycle and erodes trust in the review.
 
 ## Conformance (дифф против конвенций кодбейзы)
@@ -599,7 +612,7 @@ If a ticket is linked, leave a summary comment on it (Linear MCP `save_comment`,
    merges upstream) — redo both; "it passed an hour ago" is not current.
 
 Then, if the user wants a PR:
-- Use the overlay-specified shortcut if available (e.g. `linear pr` for swarm).
+- Use the overlay-specified shortcut if available (e.g. `linear pr` for the workspace).
 - Otherwise `gh pr create` with title + body referencing the ticket / changelog entry.
 - Promote the draft from 6.3 if you opened one for the diff review.
 
@@ -645,7 +658,7 @@ After every stage, **STOP** and surface the artifact to the user. Do not chain s
 
 These checkpoints are the **only** explicit stops. There are no per-action checkpoints inside a stage. The narration protocol from Stage 3 is for visibility, not for stopping.
 
-**Post-pushback discipline (outward actions).** Normal in-zone work is auto-do (the 4-condition rule — no per-action asking). But a user **pushback or correction resets that consent for the next batch of *outward* actions** — anything that writes to an external system or is hard to reverse (uploads, ticket comments, commits, pushes, PRs). After the user questions or corrects an approach, **confirm the approach in one line before firing a batch** of those, rather than treating the earlier go-ahead as still valid. This is the only exception to "don't re-ask inside a stage" — it prevents the over-ask-then-over-act swing. (SPRK-90: right after a "куда ты это клеишь?" pushback I launched 7 Linear uploads in parallel; 2 were auto-denied because charging ahead post-doubt reads as ignoring it.)
+**Post-pushback discipline (outward actions).** Normal in-zone work is auto-do (the 4-condition rule — no per-action asking). But a user **pushback or correction resets that consent for the next batch of *outward* actions** — anything that writes to an external system or is hard to reverse (uploads, ticket comments, commits, pushes, PRs). After the user questions or corrects an approach, **confirm the approach in one line before firing a batch** of those, rather than treating the earlier go-ahead as still valid. This is the only exception to "don't re-ask inside a stage" — it prevents the over-ask-then-over-act swing. (a prior retro: right after a "куда ты это клеишь?" pushback I launched 7 Linear uploads in parallel; 2 were auto-denied because charging ahead post-doubt reads as ignoring it.)
 
 **Surface checkpoints as HTML, not markdown walls.** When a gate needs the user to read something substantial (the Stage 2 plan, a set of open questions / contentious decisions, design EVIDENCE, the Stage 6 final summary), render it via the `html-report` skill, **open it in external Chrome** (`open -a "Google Chrome" <abs-path>`), and print the absolute `file://` path too. The numbered markdown files stay the durable trail; the HTML is the human-facing view. The cmux built-in browser shows HTML as plaintext (and hangs on link-select), so don't rely on it. Never give a relative path in chat (cmux mangles `tmp/...` → `https://tmp/...` → blank) and never spin up a localhost server.
 
@@ -670,7 +683,7 @@ These checkpoints are the **only** explicit stops. There are no per-action check
 
 The numeric prefix ensures `ls` shows stages in order.
 
-`<tmp-root>` defaults to `<repo-root>/tmp/`. Overlays may override (e.g. swarm uses `<swarm-root>/tmp/`).
+`<tmp-root>` defaults to `<repo-root>/tmp/`. Overlays may override (e.g. the workspace uses `<workspace-root>/tmp/`).
 
 ---
 
@@ -711,6 +724,69 @@ Workspace overlays live at `~/.claude/skills/pipeline/contexts/*.md`. Each overl
 
 ---
 
+### Onboarding a workspace — what it is, and a copy-paste template
+
+A **workspace** is a recurring project context the user works in — a repo (or a multi-repo root) with conventions the core can't guess: which issue tracker + team/project, which directories are editable vs off-limits, the changelog/branch conventions, the build/test/PR commands, the live verification harness, and who owns what. The core is workspace-agnostic; a **workspace overlay** (`contexts/<name>.md`) carries all of that so every run there "just works".
+
+**When to onboard one:** if the user runs the pipeline in the same project repeatedly and no overlay matches their `pwd` at Stage 0, offer to create an overlay (a one-time setup). Use the same template to *extend/fix* an existing overlay.
+
+**How to fill it — discover first, then ask only the human-only bits:**
+- **Discover from the repo:** the `.git` remote + default branch; `package.json` / `pyproject` scripts (build / typecheck / test commands); an `AGENTS.md` / `CONTRIBUTING.md` / root project doc (conventions, zones); a `changelog/` dir + its template; existing branch names (`git branch -a`); a test config (`vitest*.config.*`, a `pytest` section) for the deterministic-test harness.
+- **Ask the user only:** the issue tracker + team/project + default assignee; which dirs are OFF-LIMITS (others' zones) and who owns them; the deploy/CI gate (what must be green to merge); whether a **live verification harness** exists (how to bring the running app up and drive it for red→green) or note "none yet".
+- **Validate before trusting it:** test that the Detection signature actually matches the user's `pwd`; run the build/test commands once; if you reference a verification harness, confirm it exists. An overlay that doesn't auto-detect, or whose commands are wrong, is worse than none.
+
+**Generic overlay template** — copy to `~/.claude/skills/pipeline/contexts/<name>.md`, fill every `<…>`, delete sections that don't apply:
+
+````markdown
+# <Workspace name> overlay for /pipeline
+
+Loaded by /pipeline when `pwd` is inside this workspace. If detection fails, this file is ignored.
+
+## Detection signature
+All true ⇒ in this workspace:
+- `pwd` has an ancestor dir named `<root-dir>`, AND
+- that dir contains `<marker file, e.g. CLAUDE.md / package.json>`, AND
+- that file mentions `<unique content marker, e.g. an org/product name>`.
+(Specific enough that no OTHER workspace matches.)
+
+## Project structure
+- **Active zones** (edit freely): `<repo-a/>`, `<repo-b/>` — one line each on what it is.
+- **Forbidden zones** (read-only; file issues to owners): `<vendor/>`, `<owned-by-X/>` — and who owns each.
+- **Exceptions**: any sub-path of a forbidden zone that IS editable.
+
+## Conventions
+- Per-project files: `AGENTS.md` (rules), `BACKLOG.local.md`, `changelog/` (`<format / _TEMPLATE.md>`).
+- Temp artifacts root: `<where tmp/ lives, e.g. <root>/tmp/>`.
+
+## Stage 0 — tracker & branches
+- **Issue tracker:** `<Linear MCP / GitHub Issues (gh) / Jira / none>` — team(s) `<…>`, project(s) `<by zone>`, default assignee `<user>`. Note any TRAPS (e.g. a same-named project bound to the wrong team).
+- **Branch naming:** `<convention, e.g. <issue-id-lower>/<2-word-desc>>` + any tracker↔git status automation (push→In Progress, PR→In Review, merge→Done?).
+
+## Stage 1 (Analyst) — inject into the sub-agent prompt
+- Read-list additions: `<root project doc, affected AGENTS.md, changelog tail, NOTES.md>`.
+- Zone classification rule (own vs forbidden).
+- Project-specific "what could break" contracts (framework/API contracts a change can violate) + any component-taxonomy gotchas.
+
+## Live red→green verification harness
+- How to bring the running app up and drive it for red→green (a script / a dedicated skill / `<commands>`), and the deterministic fallback test (config + run command). If none exists yet, say so — that's a known gap, not a silent omission.
+
+## Stage 4 (Reviewer) — inject into the sub-agent prompt
+- Workspace contract-violation checks (forbidden-zone touches, secret in client bundle, banned endpoint patterns, e2e-selector changes).
+- Risk flags (the deploy/CI gate).
+
+## Stage 6 (Final)
+- Changelog placement + format.
+- PR pre-flight: base branch per repo + the exact build/typecheck/lint command per repo.
+- Ticket-comment tool; inline-image upload helper if the tracker needs one.
+
+## People
+| who | role / zone | contact |
+````
+
+The minimum for it to "work right away": a Detection signature that matches, the tracker (Stage 0), the zones (Stage 1), and the build/test/PR commands (Stage 6). The rest can be filled incrementally as the workspace teaches you (every manual redirect ≥3 or ad-hoc deviation is a cue to harden the overlay — see Stage 6.7).
+
+---
+
 ## Integration with other skills
 
 - **`/think`** — explicitly loaded at Stage 2 (planning) and Stage 5 (fix-loop triage). The four Karpathy principles drive both the plan and the pushback against bad reviewer notes.
@@ -744,23 +820,27 @@ For Linear-based workspaces only. The pipeline runs fully without `linear-cli` �
 
 ## Versioning & self-metrics (appendix)
 
-**Version:** v2 (2026-06-01) — added the design/Figma track (task-type classification; figma-analyze / figma-audit / figma-implement routing; Analyst sections Figma-map + A/B/C scope + Connected-flows + existing-logic inventory; the `comparison.html` wall), the stage progress-tree, compact-safe incremental logging, final visual acceptance, the Stage 6.7 metrics emit, and the swarm Linear-upload helper.
+**Version:** v2 (2026-06-01) — added the design/Figma track (task-type classification; figma-analyze / figma-audit / figma-implement routing; Analyst sections Figma-map + A/B/C scope + Connected-flows + existing-logic inventory; the `comparison.html` wall), the stage progress-tree, compact-safe incremental logging, final visual acceptance, the Stage 6.7 metrics emit, and the the workspace Linear-upload helper.
 
-**v2.1 (2026-06-01)** — Setup step 8 **baseline check** (git freshness before analysis; prevents the wasted-Analyst-round-on-stale-branch failure) and Stage 0 **glossary resolve** (confirm transcribed/voice domain terms absent from code before Stage 1). Swarm overlay: Sparkling component taxonomy (attachment=chat vs screen-level) in Stage 1, and expanded §Ticket quality (no-redundancy / attach-not-describe / no-meta / verify-absence / «не делаем» only-for-traps).
+**v2.1 (2026-06-01)** — Setup step 8 **baseline check** (git freshness before analysis; prevents the wasted-Analyst-round-on-stale-branch failure) and Stage 0 **glossary resolve** (confirm transcribed/voice domain terms absent from code before Stage 1). The workspace overlay: Sparkling component taxonomy (attachment=chat vs screen-level) in Stage 1, and expanded §Ticket quality (no-redundancy / attach-not-describe / no-meta / verify-absence / «не делаем» only-for-traps).
 
 **v2.2 (2026-06-01)** — **Stage 1.5 Analysis metrics**: a front-half-only score (`analysis-scores.jsonl`, dims A1–A4) so analysis/task-framing runs that stop at ticket-creation are tracked even without reaching Stage 6.7, plus two harden-triggers (`premise_corrections ≥ 2`, `analyst_reruns ≥ 1`).
 
-**v2.3 (2026-06-06)** — design-fidelity hardening from SPRK-79 (composite 0.78; all regret traced to one root — leaf-element approximation): Stage 3 ⟦DESIGN⟧ per-layer rhythm now mandates **per-leaf extraction before coding** (icons → asset export, strokes/fills → per-node dump; no lucide/reused-component approximation) + an explicit **Figma↔render self-diff gate** before a layer is "done"; Analyst **Connected-flows** now splits out-of-scope into hard-"no" vs "not-yet" and builds extensible for "not-yet"; Reviewer must **hexdump byte-level claims**. Swarm overlay design block gained the per-leaf-fidelity rule.
+**v2.3 (2026-06-06)** — design-fidelity hardening from a prior retro (composite 0.78; all regret traced to one root — leaf-element approximation): Stage 3 ⟦DESIGN⟧ per-layer rhythm now mandates **per-leaf extraction before coding** (icons → asset export, strokes/fills → per-node dump; no lucide/reused-component approximation) + an explicit **Figma↔render self-diff gate** before a layer is "done"; Analyst **Connected-flows** now splits out-of-scope into hard-"no" vs "not-yet" and builds extensible for "not-yet"; Reviewer must **hexdump byte-level claims**. The workspace overlay design block gained the per-leaf-fidelity rule.
 
-**v2.4 (2026-06-06)** — **`html-report` skill** extracted and wired in: user-facing checkpoint artifacts (Stage 2 plan, open questions / contentious decisions, design EVIDENCE, Stage 6 final) are surfaced as scannable dark-themed HTML (**opened in external Chrome** via `open -a "Google Chrome"` — the cmux built-in browser shows HTML as **plaintext**; absolute `file://` path printed as fallback; block `<style>`) in addition to the markdown trail. Encodes the artifact-delivery rules learned in SPRK-90: never localhost for delivery; never a relative path in chat (cmux mangles `tmp/...` → `https://tmp/...` → blank page); block CSS renders fine in Chrome (the earlier "inline-styles fix" was a misdiagnosis).
+**v2.4 (2026-06-06)** — **`html-report` skill** extracted and wired in: user-facing checkpoint artifacts (Stage 2 plan, open questions / contentious decisions, design EVIDENCE, Stage 6 final) are surfaced as scannable dark-themed HTML (**opened in external Chrome** via `open -a "Google Chrome"` — the cmux built-in browser shows HTML as **plaintext**; absolute `file://` path printed as fallback; block `<style>`) in addition to the markdown trail. Encodes the artifact-delivery rules learned in a prior retro: never localhost for delivery; never a relative path in chat (cmux mangles `tmp/...` → `https://tmp/...` → blank page); block CSS renders fine in Chrome (the earlier "inline-styles fix" was a misdiagnosis).
 
-**v2.5 (2026-06-06)** — process hardening from SPRK-90 (composite 0.75; regret root D3 autonomy + D8 cost — env-blocker handling + outward-action discipline, not craft), via the **`pipeline-audit`** skill: Stage 3 **local-verification discipline** (kill stale dev/storybook servers before diagnosing; evidence-backed diagnosis — no asserted root-cause; a blocked check is to fix, not skip); Stage transitions **post-pushback confirm-before-batch** for outward actions; Stage 6.4 **visual evidence inline** (render report HTML → full-page PNG → `![](assetUrl)`, not files-to-download); Analyst **false-API-premise → mock-behind-real-shaped-seam** playbook; fixed the v2.4 appendix cmux drift; swarm overlay gained the Linear inline-render helper + the `PieCard data.name` reserved-prop gotcha.
+**v2.5 (2026-06-06)** — process hardening from a prior retro (composite 0.75; regret root D3 autonomy + D8 cost — env-blocker handling + outward-action discipline, not craft), via the **`pipeline-audit`** skill: Stage 3 **local-verification discipline** (kill stale dev/storybook servers before diagnosing; evidence-backed diagnosis — no asserted root-cause; a blocked check is to fix, not skip); Stage transitions **post-pushback confirm-before-batch** for outward actions; Stage 6.4 **visual evidence inline** (render report HTML → full-page PNG → `![](assetUrl)`, not files-to-download); Analyst **false-API-premise → mock-behind-real-shaped-seam** playbook; fixed the v2.4 appendix cmux drift; the workspace overlay gained the Linear inline-render helper + the `PieCard data.name` reserved-prop gotcha.
 
-**v2.6 (2026-06-12)** — from the SPRK-108 review lessons: Stage 4 Reviewer gained the **`## Conformance` section** (conformance-review skill methodology: diff vs the repo's live conventions — reuse-internal-first / no over-wrap / Literal-aliases / `.env.example` / codebaseEvidence per finding, baseline-violates → nit max; rounds N≥2 re-check only new hunks) + the skill added to the reviewer read-list; Stage 6.5 gained the **mandatory PR pre-flight** (rebase-freshness via `rev-list --count HEAD..origin/<base>` + post-rebase build/typecheck with zero NEW errors; redo both if the base moved since the last check). Swarm overlay: per-repo pre-flight commands + base branches.
+**v2.6 (2026-06-12)** — from the a prior retro review lessons: Stage 4 Reviewer gained the **`## Conformance` section** (conformance-review skill methodology: diff vs the repo's live conventions — reuse-internal-first / no over-wrap / Literal-aliases / `.env.example` / codebaseEvidence per finding, baseline-violates → nit max; rounds N≥2 re-check only new hunks) + the skill added to the reviewer read-list; Stage 6.5 gained the **mandatory PR pre-flight** (rebase-freshness via `rev-list --count HEAD..origin/<base>` + post-rebase build/typecheck with zero NEW errors; redo both if the base moved since the last check). The workspace overlay: per-repo pre-flight commands + base branches.
 
-**v2.7 (2026-06-15)** — from SPRK-278: new **Stage 2.5 — Failing test first (TDD)** between Plan and Implement — write a test that is RED on the unfixed code, extract a pure testable core for hard-to-test defects (React/valtio race, 3rd-party widget, IO), match the repo's conformant test harness (no bespoke rig), and **prove red→green** by reverting the guard at the end of Stage 3 (a guard that doesn't fail without the fix is not a guard). Test ships in the same diff/PR. Also: **one-doc-per-task** convention — a single consolidated doc per task (cause/fix/decisions/verification) for shared/ticket use, neutral politesse tone (never "the ticket is wrong"), no process chatter / owner-assignment inside the doc (that lives in chat); the html-report skill carries the rendering convention.
+**v2.7 (2026-06-15)** — from a prior retro: new **Stage 2.5 — Failing test first (TDD)** between Plan and Implement — write a test that is RED on the unfixed code, extract a pure testable core for hard-to-test defects (React/valtio race, 3rd-party widget, IO), match the repo's conformant test harness (no bespoke rig), and **prove red→green** by reverting the guard at the end of Stage 3 (a guard that doesn't fail without the fix is not a guard). Test ships in the same diff/PR. Also: **one-doc-per-task** convention — a single consolidated doc per task (cause/fix/decisions/verification) for shared/ticket use, neutral politesse tone (never "the ticket is wrong"), no process chatter / owner-assignment inside the doc (that lives in chat); the html-report skill carries the rendering convention.
 
-**v2.8 (2026-06-17)** — from SPRK-292: **live red→green gate**. Stage 2.5 extended — for a runtime/UI symptom the unit/component test is the durable proof but not the whole proof: reproduce the failure in the real app *with your own eyes* before the fix and re-confirm after, via the workspace overlay's harness when defined (swarm → the new **`sparkling-verify`** skill: mint signed initData → drive the real Sparkling frontend in Playwright; flaky live agent/centrifuge → fall back to a deterministic jsdom/RTL component test). Hard gate: never write "works/verified" in a facing doc without an observed RED→GREEN — **"couldn't reproduce" ≠ "works"**, reasoning is not verification. Swarm overlay carries the concrete wiring.
+**v2.8 (2026-06-17)** — from a prior retro: **live red→green gate**. Stage 2.5 extended — for a runtime/UI symptom the unit/component test is the durable proof but not the whole proof: reproduce the failure in the real app *with your own eyes* before the fix and re-confirm after, via the workspace overlay's live/UI harness when defined (flaky live env → fall back to a deterministic component test). Hard gate: never write "works/verified" in a facing doc without an observed RED→GREEN — **"couldn't reproduce" ≠ "works"**, reasoning is not verification. The workspace overlay carries the concrete harness wiring.
+
+**v2.9 (2026-06-17)** — from a prior retro (analysis miss): Stage 1 Analyst **"Current behavior" must be grounded in an OBSERVED payload/state, not the issue's description** — a bug's described symptom / quoted payload / "probable cause" are premises, often incomplete (a captured snapshot can miss a real-time event) or symptom-level; reproduce the failure, read the WHOLE real payload/events and **trace them to their producer** (the code that builds the response), confirm/refute the stated cause against what you observe before designing a fix. Mirrored in the `fix-issue` skill (step 3).
+
+**v2.10 (2026-06-17)** — core kept workspace-agnostic: recent additions reworded to **base terms** (project / repo / issue / response / client) with workspace-specifics (ticket IDs, framework field/component names) pushed to the overlay. Added **"Onboarding a workspace"** to Overlay composition — what a workspace is, a discover-then-ask procedure, and a **copy-paste generic overlay template** (Detection signature · zones · conventions · tracker/branches · Analyst/Reviewer injects · live red→green harness · Stage 6 build-PR · people) so an agent can add a user's existing workspace or create a new one that works on first run.
 
 Bump this line on every change; `skillVersion` in `metrics.json` = `v<N>-<date>`.
 
@@ -776,4 +856,4 @@ Bump this line on every change; `skillVersion` in `metrics.json` = `v<N>-<date>`
 - `analysis`: 4 dims [0..1], higher-better — **A1 Baseline** (clean=1 / switched=.7 / stale-caught-late=0; auto) · **A2 Premise accuracy** (= 1 − min(1, `premise_corrections`/4); self) · **A3 Blocker discovery** (= caught/(caught+missed), NA if 0; self) · **A4 Artifact completeness** (01-analysis required sections present; auto). `composite = mean(live dims)`, `regret = 1 − composite`.
 - `triggers`: `{ premise_corrections, analyst_reruns }` — the two harden-triggers (T1 `premise_corrections ≥ 2`, T2 `analyst_reruns ≥ 1`).
 
-**Version comparison:** within a `{taskType × TSU-tercile}` bucket, `K = median(regret_old) / median(regret_new)` (the "N× better" figure), claimed only on non-overlapping IQR, always with the top-3 `wᵢ·ΔDᵢ` "because" breakdown. `auto` dimensions are deterministic from the trail; `post-run` ones are scored by a separate fresh-context agent (no self-grading). Full design + worked v1 baseline: `swarm/tmp/sprk-72/PIPELINE-V2-PROPOSAL.md`.
+**Version comparison:** within a `{taskType × TSU-tercile}` bucket, `K = median(regret_old) / median(regret_new)` (the "N× better" figure), claimed only on non-overlapping IQR, always with the top-3 `wᵢ·ΔDᵢ` "because" breakdown. `auto` dimensions are deterministic from the trail; `post-run` ones are scored by a separate fresh-context agent (no self-grading). Full design + worked v1 baseline: `the workspace/tmp/a prior retro/PIPELINE-V2-PROPOSAL.md`.
